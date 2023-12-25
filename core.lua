@@ -11,13 +11,36 @@ BINDING_NAME_CONROCUNLOCK = "Lock/Unlock ConROC"
 ConROC = LibStub('AceAddon-3.0'):NewAddon('ConROC', 'AceConsole-3.0', 'AceEvent-3.0', 'AceTimer-3.0');
 
 ConROC.Textures = {
+	['locked'] = 'Interface\\AddOns\\ConROCX\\images\\padlock_closed',
+	['unlocked'] = 'Interface\\AddOns\\ConROCX\\images\\padlock_open',
 	['Ping'] = 'Interface\\Cooldown\\ping4',
 	['Star'] = 'Interface\\Cooldown\\star4',
 	['Starburst'] = 'Interface\\Cooldown\\starburst',
-	['Shield'] = 'Interface\\AddOns\\ConROC\\images\\shield2',
-	['Skull'] = 'Interface\\AddOns\\ConROC\\images\\skull',
+	['Shield'] = 'Interface\\AddOns\\ConROCX\\images\\shield2',
+	['Skull'] = 'Interface\\AddOns\\ConROCX\\images\\skull',
+	['Caster'] = 'Interface\\AddOns\\ConROCX\\images\\role-caster',
+	['Caster_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-caster_disabled',
+	['PvP'] = 'Interface\\AddOns\\ConROCX\\images\\role-pvp',
+	['PvP_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-pvp_disabled',
+	['Melee'] = 'Interface\\AddOns\\ConROCX\\images\\role-melee',
+	['Melee_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-melee_disabled',
+	['Tank'] = 'Interface\\AddOns\\ConROCX\\images\\role-tank',
+	['Tank_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-tank_disabled',
+	['Healer'] = 'Interface\\AddOns\\ConROCX\\images\\role-healer',
+	['Healer_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-healer_disabled',
+	['Ranged'] = 'Interface\\AddOns\\ConROCX\\images\\role-range',
+	['Ranged_disabled'] = 'Interface\\AddOns\\ConROCX\\images\\role-range_disabled',
 };
 ConROC.FinalTexture = nil;
+
+ConROC.IsClassic = WOW_PROJECT_ID == WOW_PROJECT_CLASSIC
+
+ConROC.Seasons ={
+	IsWotlk = WOW_PROJECT_ID == WOW_PROJECT_WRATH_CLASSIC, 
+	IsEra = ConROC.IsClassic and (not C_Seasons.HasActiveSeason()),
+	IsSoD = ConROC.IsClassic and C_Seasons.HasActiveSeason() and (C_Seasons.GetActiveSeason() ~= Enum.SeasonID.Hardcore),
+	IsHardcore = C_GameRules and C_GameRules.IsHardcoreActive(),
+}
 
 ConROC.Colors = {
 	Info = '|cFF1394CC',
@@ -90,7 +113,7 @@ local orientations = {
 }
 
 local _, _, classIdv = UnitClass('player');
-local cversion = GetAddOnMetadata('ConROC_' .. ConROC.Classes[classIdv], 'Version');
+local cversion = GetAddOnMetadata('ConROCX_' .. ConROC.Classes[classIdv], 'Version');
 local classinfo = " ";
 
 	if cversion ~= nil then
@@ -657,7 +680,7 @@ function ConROC:OnInitialize()
 	ConROCButtonFrame:Hide();
 	
 	local _, _, Class = UnitClass("player")
-	if Class == 1 or Class == 2 or Class == 3 or Class == 4 or Class == 5 or Class == 8 or Class == 9 then
+	if Class == 1 or Class == 2 or Class == 3 or Class == 4 or Class == 5 or Class == 6 or Class == 7 or Class == 8 or Class == 9 or Class == 11 then
 		self.SpellmenuFrame();	
 	end
 	
@@ -783,11 +806,22 @@ function ConROC:OnEnable()
 	self:RegisterEvent('LEARNED_SPELL_IN_TAB');
 	self:RegisterEvent('CHARACTER_POINTS_CHANGED');
 	self:RegisterEvent('UPDATE_MACROS');
+	self:RegisterEvent("PLAYER_EQUIPMENT_CHANGED");
 
 	self:RegisterEvent('PLAYER_CONTROL_LOST');
 	self:RegisterEvent('PLAYER_CONTROL_GAINED');	
 	
 	self:Print(self.Colors.Info .. 'Initialized');
+end
+
+function ConROC:PLAYER_EQUIPMENT_CHANGED(self, slotID, beingEquipped)
+	local _, _, Class = UnitClass("player")
+	
+	if slotID == 18 then
+		if Class == 5 or Class == 8 or Class == 9 then
+			ConROC:wandEquipmentChanged(slotID);
+		end
+	end
 end
 
 function ConROC:ACTIONBAR_HIDEGRID()
@@ -818,7 +852,7 @@ function ConROC:PLAYER_ENTERING_WORLD()
 	self:UpdateButtonGlow();
 	if not self.rotationEnabled then
 		self:Print(self.Colors.Success .. 'Auto enable on login!');
-		self:Print(self.Colors.Info .. 'Loading class module');
+		self:Print(self.Colors.Info .. 'Loading '.. self.Classes[classIdv] ..' module');
 		self:LoadModule();
 		self:EnableRotation();
 		self:EnableDefense();
@@ -864,8 +898,11 @@ function ConROC:PLAYER_REGEN_DISABLED()
 end
 
 function ConROC:LEARNED_SPELL_IN_TAB()
+	ConROC:UpdateSpellID();
 	ConROC:ButtonFetch();
-	ConROC:SpellMenuUpdate();
+	C_Timer.After(3, function()
+		ConROC:SpellMenuUpdate(true); -- new spell learned
+	end);
 end
 
 function ConROC:ButtonFetch()
@@ -934,8 +971,8 @@ function ConROC:LoadModule()
 		self:Print(self.Colors.Error, 'Invalid player class, please contact author of addon.');
 		return;
 	end
-
-	local module = 'ConROC_' .. self.Classes[classId];
+	
+	local module = 'ConROCX_' .. self.Classes[classId];
 	local _, _, _, loadable, reason = GetAddOnInfo(module);
 	
 	if IsAddOnLoaded(module) then

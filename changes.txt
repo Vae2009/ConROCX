@@ -1,3 +1,11 @@
+Ver 2.0.2
+	-Reworked sections of helper.lua
+	-Added new icons for roles in core.lua
+	-Started to add support for translations.
+	-Added a lock/unlock icon to the Spellmenu
+Ver 2.0.1
+	-Updated tooltips to anchor at cursor
+
 Ver 2.0.0
 	-Added more function to spellmenu and ability to hide. Still shows on Mouseover.
 

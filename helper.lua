@@ -1,4 +1,5 @@
 ConROC.RaidBuffs = {};
+ConROC.WarningFlags = {};
 
 -- Global cooldown spell id
 -- GlobalCooldown = 61304;
@@ -6,11 +7,33 @@ ConROC.RaidBuffs = {};
 local INF = 2147483647;
 
 function ConROC:TalentChosen(spec, talent)
-	local _, _, _, _, currentRank, maxRank = GetTalentInfo(spec, talent);
+	local name, _, tier, _, currentRank, maxRank = GetTalentInfo(spec, talent);
 	if currentRank >= 1 then
-		return true, currentRank, maxRank;
+		return true, currentRank, maxRank, name, tier;
 	end
 	return false, 0, 0;
+end
+
+function ConROC:currentSpec()
+    local numTabs  = GetNumTalentTabs()
+    local currentSpecName
+    local maxPoints = 0
+    for tab = 1, numTabs do
+        local numTalents = GetNumTalents(tab)
+        local pointsSpent = 0
+
+        for talent = 1, numTalents do
+            local _, _, _, _, spent = GetTalentInfo(tab, talent)
+            pointsSpent = pointsSpent + spent
+        end
+
+        if pointsSpent > maxPoints then
+            maxPoints = pointsSpent
+            currentSpecName = GetTalentTabInfo(tab)
+        end
+    end
+
+    return currentSpecName
 end
 
 function ConROC:SpecTally()
@@ -46,17 +69,49 @@ function ConROC:PlayerSpeed()
 	return moving;
 end
 
-function ConROC:Targets(spellID)
-	local inRange = 0
-	for i = 1, 40 do
-		if UnitExists('nameplate' .. i) and ConROC:IsSpellInRange(GetSpellInfo(spellID), 'nameplate' .. i) then
-			inRange = inRange + 1
-		end
-	end
---	print(inRange)
-	return inRange;
+local defaultEnemyNameplates
+function ConROC:forceNameplates()
+	defaultEnemyNameplates = GetCVar("nameplateShowEnemies")
+	if defaultEnemyNameplates ~= 1 then
+  		--SetCVar("nameplateOtherMinAlpha", 1.0)
+		--SetCVar("nameplateOtherMaxAlpha", 1.0)
+		--SetCVar("nameplateMinAlpha", 0.2) 
+		--SetCVar("nameplateMaxAlpha", 0.2)
+		SetCVar("nameplateSelectedAlpha", 0.5)
+  		SetCVar("nameplateShowEnemies", 1)
+  	end
 end
 
+function ConROC:restoreNameplates()
+	-- Restore default settings 
+	SetCVar("nameplateMinAlpha", 1) 
+	SetCVar("nameplateMaxAlpha", 1)
+	SetCVar("nameplateSelectedAlpha", 1)
+	SetCVar('nameplateShowEnemies', defaultEnemyNameplates) 
+end
+
+local frame = CreateFrame("Frame")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Entering combat
+frame:RegisterEvent("PLAYER_REGEN_ENABLED") -- Leaving combat
+
+frame:SetScript("OnEvent", function(self, event)
+  if event == "PLAYER_REGEN_DISABLED" then
+    ConROC:forceNameplates()
+  elseif event == "PLAYER_REGEN_ENABLED" then
+    ConROC:restoreNameplates()
+  end
+end)
+
+function ConROC:Targets(spellID)
+	local inRange = 0
+	for id = 1, 40 do
+      local unitID = "nameplate" .. id
+	  if UnitCanAttack("player", unitID) and ConROC:IsSpellInRange(GetSpellInfo(spellID), unitID) then
+	     inRange = inRange + 1
+	  end
+	end
+	return inRange;
+end
 function ConROC:UnitAura(spellID, timeShift, unit, filter, isWeapon)
 	timeShift = timeShift or 0;
 	if isWeapon == "Weapon" then
@@ -124,9 +179,10 @@ end
 
 function ConROC:TargetDebuff(spellID)
 	for i=1,16 do 
-		local _, _, count, _, _, _, _, _, _, spell = UnitAura("target", i, 'PLAYER|HARMFUL');
-			if spell == spellID then 
-				return true, count;
+		local _, _, count, _, _, expirationTime, _, _, _, spell = UnitAura("target", i, 'PLAYER|HARMFUL');
+			if spell == spellID then
+				local remainingTime = math.floor((expirationTime - GetTime())*10) / 10
+				return true, count, remainingTime;
 			end 
 		 
 	end
@@ -461,8 +517,32 @@ function ConROC:FindSpellInSpellbook(spellID)
 
 	return nil;
 end
+--[[ -- Not working to find out if you are behind a target.
+function ConROC:IsBehindTarget()
+    local playerX, playerY = UnitPosition("player")
+    local targetX, targetY = UnitPosition("target")
 
+        local targetFacing = ObjectFacing("target")
+		print("targetFacing", targetFacing)
+    if playerX and playerY and targetX and targetY then
+        local playerFacing = GetPlayerFacing()
+        local dx = targetX - playerX
+        local dy = targetY - playerY
+        local angle = math.atan2(dy, dx)
+        local angleDifference = math.deg(math.abs(playerFacing - angle))
+        if angleDifference > 180 then
+            angleDifference = 360 - angleDifference
+        end
 
+        -- Define a threshold angle for "behind." Adjust this angle as needed.
+        local behindThreshold = 90
+
+        return angleDifference <= behindThreshold
+    else
+        return false
+    end
+end
+--]]
 function ConROC:IsSpellInRange(spell, unit)
 	local unit = unit or 'target';
 	local range = false;
@@ -479,7 +559,7 @@ end
 
 function ConROC:AbilityReady(spellid, timeShift, pet)
 	local cd, maxCooldown = ConROC:Cooldown(spellid, timeShift + 1);
-	local known = IsPlayerSpell(spellid);
+	local known = IsPlayerSpell(spellid) or IsSpellKnownOrOverridesKnown(spellid);
 	local usable, notEnough = IsUsableSpell(spellid);
 	local castTimeMilli = select(4, GetSpellInfo(spellid));
 	local rdy = false;
@@ -631,6 +711,25 @@ function ConROC:ItemCooldown(itemid, timeShift)
 	end;
 end
 
+function ConROC:Interrupt()
+	local targetName = UnitName("target") -- Get the name of the target
+    if not targetName then
+        return false -- No target or invalid target
+    end
+
+    local spellName, _, _, _, _, _, castEndTime, _, _, spellId = UnitCastingInfo("target")
+    local channeledSpellName, _, _, _, _, _, channeledEndTime, _, _, channeledSpellId = UnitChannelInfo("target")
+
+    if spellName then
+        local isInterruptible = IsSpellInterruptible(spellId) -- Check if the spell is interruptible
+        return isInterruptible
+    elseif channeledSpellName then
+        local isInterruptible = IsSpellInterruptible(channeledSpellId) -- Check if the channeled spell is interruptible
+        return isInterruptible
+    end
+
+    return false
+end
 --[[function ConROC:Interrupt()				--Classic Broke
 	if UnitCanAttack ('player', 'target') then
 		local tarchan, _, _, _, _, _, cnotInterruptible = UnitChannelInfo("target");
@@ -684,6 +783,34 @@ function ConROC:Equipped(itemType, slotName)
 		end
 	return false;
 end
+--[[function ConROC:TierPieces(tier, bonus) --function to check for Tire Piece bonuses
+  local pieceCount = 0
+  for i = 1, 19 do
+        local item = GetInventoryItemID("player", i)
+        if item  then
+            local itemName, itemLink, _, _, _, _, _, _, _, _, _, _, _, _, _, itemDesc = GetItemInfo(item)
+            if itemDesc and string.find(itemName, tier) then
+                pieceCount = pieceCount + 1
+            
+            end
+        end
+    end
+  if pieceCount >= 2 then
+    return true, pieceCount, tier
+  else 
+    return false
+  end
+end--]]
+
+function ConROC:IsGlyphActive(glyphSpellID)
+    for i = 1, 6 do
+        local enabled, _, spellID = GetGlyphSocketInfo(i)
+        if enabled and spellID == glyphSpellID then
+            return true
+        end
+    end
+    return false
+end
 
 function ConROC:CheckBox(checkBox)
 	local boxChecked = false;
@@ -711,4 +838,25 @@ function ConROC:FormatTime(left)
 	else
 		return string.format("%d [S]", seconds);
 	end
+end
+
+function ConROC:Warnings(_Message, _Condition)
+	if self.WarningFlags[_Message] == nil then
+		self.WarningFlags[_Message] = 0;
+	end
+	if _Condition then
+		self.WarningFlags[_Message] = self.WarningFlags[_Message] + 1;
+		if self.WarningFlags[_Message] == 1 then
+		--print("_Message", _Message);
+			UIErrorsFrame:AddExternalErrorMessage(_Message);
+		elseif self.WarningFlags[_Message] == 15 then
+			self.WarningFlags[_Message] = 0;
+		end
+	else
+		self.WarningFlags[_Message] = 0;
+	end
+end
+
+function ConROC:DisplayErrorMessage(message, displayTime, fadeInTime, fadeOutTime, holdTime)
+  UIErrorsFrame:AddExternalErrorMessage(message, displayTime, fadeInTime, fadeOutTime, holdTime)
 end
