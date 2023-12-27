@@ -1,4 +1,4 @@
-Ver 2.0.2
+Ver 3.4.3
 	-Reworked sections of helper.lua
 	-Added new icons for roles in core.lua
 	-Started to add support for translations.
