@@ -1,7 +1,7 @@
 ## Title:-|cffFFFFFFConROCX|r- Conflict Rotation Optimizer Classic Expansions
 ## Notes: Rotation helper framework.
-## Version: 3.4.3
-## Author: Vae, 3.4.3 updated by Lith
+## Version: 3.4.0
+## Author: Vae, 3.4.0 updated by Lith
 ## Interface: 30403
 ## SavedVariables: ConROCPreferences
 ## OptionalDependencies: Bartender4, ElvUI, ButtonForge
